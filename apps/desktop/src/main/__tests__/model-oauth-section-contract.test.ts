@@ -1,5 +1,5 @@
 /**
- * Static-analysis contract for `ModelOAuthSection` in
+ * Static-analysis contract for the OAuth model-provider catalog in
  * `apps/desktop/src/renderer/settings/ProvidersPanel.tsx`
  * (PR-MODEL-OAUTH-ALL-0).
  *
@@ -30,7 +30,24 @@ const PROVIDERS_PANEL_SOURCE = resolve(
 );
 const PRELOAD_SOURCE = resolve(REPO_ROOT, 'apps', 'desktop', 'src', 'preload', 'preload.ts');
 
-describe('ModelOAuthSection card contract (PR-MODEL-OAUTH-ALL-0 + PR-CLAUDE-CARD-MOVE-0)', () => {
+describe('Model OAuth catalog contract (PR-MODEL-OAUTH-ALL-0 + PR-CLAUDE-CARD-MOVE-0)', () => {
+  it('renders OAuth as a catalog tab peer, not a standalone section above the market', async () => {
+    const src = await readFile(PROVIDERS_PANEL_SOURCE, 'utf8');
+    const tabs = src.match(/const CATALOG_TABS:[\s\S]*?\];/);
+    assert.ok(tabs, 'CATALOG_TABS literal must exist');
+    assert.match(tabs[0], /id:\s*'oauth'[\s\S]*label:\s*'OAuth'/, 'OAuth must be a catalog tab');
+    assert.match(
+      src,
+      /catalogTab === 'oauth'\s*\?\s*\(\s*<ModelOAuthSection\s*\/>/,
+      'OAuth login UI must render from the tab content branch',
+    );
+    const marketStart = src.indexOf('<section className="providerMarket">');
+    const firstOAuthRender = src.indexOf('<ModelOAuthSection />');
+    assert.ok(marketStart !== -1, 'provider market section must exist');
+    assert.ok(firstOAuthRender > marketStart, 'ModelOAuthSection must not be pinned above providerMarket');
+    assert.doesNotMatch(src, /providerOAuthHeader/, 'OAuth tab must not carry a second standalone section header');
+  });
+
   it('exposes exactly three button cards: codex, antigravity, cursor', async () => {
     // PR-CLAUDE-CARD-MOVE-0 (WAWQAQ msg ddecd729): Claude is no
     // longer a button card — the full ClaudeSubscriptionCard with
@@ -63,7 +80,7 @@ describe('ModelOAuthSection card contract (PR-MODEL-OAUTH-ALL-0 + PR-CLAUDE-CARD
 
   it('claude renders as the full inline card above the grid, not as a cross-section jump', async () => {
     const src = await readFile(PROVIDERS_PANEL_SOURCE, 'utf8');
-    // Claude is now an inline component within ModelOAuthSection,
+    // Claude is an inline component within the OAuth catalog tab,
     // not a button card that dispatches a cross-section jump.
     assert.match(
       src,
@@ -80,6 +97,74 @@ describe('ModelOAuthSection card contract (PR-MODEL-OAUTH-ALL-0 + PR-CLAUDE-CARD
       src,
       /setOpenModal\(card\.id\)/,
       'codex/cursor/antigravity cards must open the SubscriptionLoginModal',
+    );
+  });
+
+  it('ModelOAuthSection re-fetches account state on modal close so card badges stay live (PR-OAUTH-CARD-LIVE-STATE-0)', async () => {
+    // WAWQAQ msg d79fd115 follow-up: after a user completed the
+    // OAuth flow in SubscriptionLoginModal, the parent card still
+    // showed "可用 / 预览" — no live login indicator. The fix
+    // lifts a per-service snapshot map into the section and
+    // refreshes on every modal close (success OR cancel).
+    const src = await readFile(PROVIDERS_PANEL_SOURCE, 'utf8');
+    // 1. cardStates map keyed by service id must exist.
+    assert.match(
+      src,
+      /cardStates\s*,\s*setCardStates\b/,
+      'ModelOAuthSection must track per-service snapshots',
+    );
+    // 2. refreshAllCards must call getAccountState for each card.
+    assert.match(
+      src,
+      /async function refreshAllCards\(\)/,
+      'must define refreshAllCards()',
+    );
+    assert.match(
+      src,
+      /bridge\.getAccountState\(\)/,
+      'refreshAllCards must query each subscription bridge',
+    );
+    // 3. useEffect on mount fires the initial refresh.
+    const refreshOnMount = src.match(/useEffect\(\(\) =>\s*\{\s*void refreshAllCards\(\);[\s\S]*?\},\s*\[\]\)/);
+    assert.ok(refreshOnMount, 'ModelOAuthSection must refresh on mount');
+    // 4. Modal onClose triggers a re-fetch.
+    assert.match(
+      src,
+      /onClose=\{\(\)\s*=>\s*\{[\s\S]*?refreshAllCards\(\)/,
+      'modal onClose must call refreshAllCards so the card updates after login',
+    );
+    // 5. Card render shows "已登录" badge when authenticated.
+    assert.match(
+      src,
+      /isLoggedIn\s*\?\s*'已登录'\s*:\s*card\.statusLabel/,
+      'logged-in cards must show 已登录 instead of the static statusLabel',
+    );
+    // 6. data-logged-in attribute exposes the state to CSS / tests.
+    assert.match(
+      src,
+      /data-logged-in=\{isLoggedIn\s*\?\s*'true'\s*:\s*undefined\}/,
+      'logged-in cards must surface a data-logged-in attribute',
+    );
+  });
+
+  it('SettingsModal validates jumpToSettingsSection payloads against SETTINGS_NAV (PR-OAUTH-CARD-LIVE-STATE-0)', async () => {
+    // Before: any truthy `detail.section` was passed to setSection,
+    // so a typo or stale dispatch would silently land the user on
+    // the "该设置页已纳入 Maka 设置树…" fallback page with no clue.
+    const SETTINGS_MODAL = resolve(
+      REPO_ROOT, 'apps', 'desktop', 'src', 'renderer', 'settings', 'SettingsModal.tsx',
+    );
+    const src = await readFile(SETTINGS_MODAL, 'utf8');
+    // Find the handler body — match from `const handler = ` up to
+    // its `addEventListener(...)` registration.
+    const handler = src.match(
+      /const handler =[\s\S]*?window\.addEventListener\(\s*'maka:jumpToSettingsSection'/,
+    );
+    assert.ok(handler, 'jumpToSettingsSection handler must exist');
+    assert.match(
+      handler[0],
+      /SETTINGS_NAV\.some\(/,
+      'jump handler must validate the section id against SETTINGS_NAV before calling setSection',
     );
   });
 

@@ -1384,12 +1384,30 @@ function AppShell() {
   }
 
   async function stop() {
-    if (activeId) await window.maka.sessions.stop(activeId, { source: 'stop_button' });
+    if (!activeId) return;
+    try {
+      await window.maka.sessions.stop(activeId, { source: 'stop_button' });
+    } catch (error) {
+      // The Composer wires this through both the Stop button onClick
+      // and the Escape key. Both invoke `onStop` without awaiting, so
+      // a rejected IPC would otherwise surface as an
+      // UnhandledPromiseRejection and the user would see nothing.
+      // Surface it as a toast so the user knows the model wasn't
+      // actually interrupted and can retry.
+      toastApi.error('停止失败', cleanErrorMessage(error));
+    }
   }
 
   async function respondToPermission(response: PermissionResponse) {
     if (!activeId) return;
-    await window.maka.sessions.respondToPermission(activeId, response);
+    try {
+      await window.maka.sessions.respondToPermission(activeId, response);
+    } catch (error) {
+      // Same fire-and-forget call site as stop() — wrap so a failed
+      // permission response (main process busy / session dropped)
+      // surfaces instead of dying as UnhandledPromiseRejection.
+      toastApi.error('响应失败', cleanErrorMessage(error));
+    }
   }
 
   async function refreshMessages(sessionId: string) {
@@ -1608,6 +1626,13 @@ function AppShell() {
       case 'complete':
         if (event.stopReason !== 'permission_handoff') {
           clearStreaming(sessionId);
+          // PR-PERMISSION-UI-CLEANUP-0: parallel the `abort` branch
+          // above — drop any stranded permission request for this
+          // session when it completes for non-permission-handoff
+          // reasons. Without this, a session that finishes while a
+          // permission overlay was mounted would leave the overlay
+          // stuck on screen until the user manually switches away.
+          setPermissionBySession((current) => ({ ...current, [sessionId]: undefined }));
         }
         void refreshSessions();
         void refreshMessages(sessionId);

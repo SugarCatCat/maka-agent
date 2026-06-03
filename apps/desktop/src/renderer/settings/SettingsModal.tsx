@@ -716,7 +716,17 @@ function SettingsSurface(props: {
   useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ section?: SettingsSection }>).detail;
-      if (detail?.section) setSection(detail.section);
+      // PR-OAUTH-CARD-LIVE-STATE-0: validate against SETTINGS_NAV so
+      // a dispatched section id that doesn't match any nav item falls
+      // through to the default fallback page silently. Previously
+      // any truthy string was accepted; a typo would land the user
+      // on "该设置页已纳入 Maka 设置树…" with no clear cause.
+      if (
+        detail?.section &&
+        SETTINGS_NAV.some((item) => item.id === detail.section)
+      ) {
+        setSection(detail.section);
+      }
     };
     window.addEventListener('maka:jumpToSettingsSection', handler);
     return () => window.removeEventListener('maka:jumpToSettingsSection', handler);
@@ -1697,6 +1707,22 @@ function PersonalizationSettingsPage(props: {
   const [uiLocale, setUiLocale] = useState<UiLocalePreference>(value.uiLocale);
   const toast = useToast();
   const [saving, setSaving] = useState(false);
+
+  // PR-PERSONALIZATION-SYNC-0: sync form state when the persisted
+  // personalization changes externally. Two real scenarios:
+  //   1. Server-side sanitization (control chars, secret-shaped
+  //      patterns) rewrites the input on save — local state would
+  //      otherwise keep showing the raw typed value while the
+  //      persisted store has the sanitized version.
+  //   2. Another agent / background sync mutates settings while the
+  //      panel is open.
+  // The user's in-progress edits aren't blown away — this only
+  // fires when the persisted reference identity actually changes.
+  useEffect(() => {
+    setDisplayName(value.displayName);
+    setAssistantTone(value.assistantTone);
+    setUiLocale(value.uiLocale);
+  }, [value.displayName, value.assistantTone, value.uiLocale]);
 
   async function save() {
     setSaving(true);
@@ -3805,7 +3831,13 @@ function BotChatSettingsPage(props: {
         toast.error(`${platform} 启动后未进入监听`, botStatusDetail(status));
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      // PR-BOT-RESTART-RACE-0: an Error with empty `.message` (rare
+      // but observed when the underlying bridge throws an
+      // uninformative `new Error()`) would render as a blank
+      // toast detail. Fall back to a generic actionable hint so
+      // the user knows next-step instead of staring at nothing.
+      const raw = error instanceof Error ? error.message : String(error);
+      const message = raw.trim() || '未知错误，请检查凭据或网络后重试。';
       toast.error(`${BOT_LABELS[selected].label} 启动失败`, message);
     } finally {
       setRestarting(false);
@@ -4156,7 +4188,14 @@ function BotChatSettingsPage(props: {
               {testing ? '测试中…' : support === 'runtime' ? '测试连接' : '测试并连接'}
             </button>
           )}
-          {support === 'runtime' && selectedStatus?.running && selected !== 'wechat' && (
+          {/* PR-BOT-RESTART-RACE-0: keep the restart button mounted
+              while a restart is in-flight, even if the bridge's
+              running flag transiently flips false during the
+              stop→start cycle inside reconcileOne. Otherwise
+              `disabled={restarting}` does nothing because the whole
+              button unmounts mid-click and the user sees no
+              resolution feedback. */}
+          {support === 'runtime' && (selectedStatus?.running || restarting) && selected !== 'wechat' && (
             <button className="settingsBotAction" type="button" disabled={restarting} onClick={restartChannel}>
               {restarting ? '重启中…' : '重启监听'}
             </button>

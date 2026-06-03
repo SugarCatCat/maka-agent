@@ -30,12 +30,13 @@ export interface ConnectionsBridge {
   hasSecret(slug: string): Promise<boolean>;
 }
 
-type CatalogTab = Extract<ProviderCategory, 'domestic' | 'overseas' | 'local'>;
+type CatalogTab = Extract<ProviderCategory, 'domestic' | 'overseas' | 'local' | 'oauth'>;
 
 const CATALOG_TABS: Array<{ id: CatalogTab; label: string }> = [
   { id: 'domestic', label: '国内' },
   { id: 'overseas', label: '海外' },
   { id: 'local', label: '本地' },
+  { id: 'oauth', label: 'OAuth' },
 ];
 
 /**
@@ -133,7 +134,6 @@ function chipTitle(connection: LlmConnection): string {
 
   return (
     <div className="providersPanel providersMarketPanel">
-      <ModelOAuthSection />
       <section className="providerMarket">
         <div className="enabledStrip" aria-label="已启用的模型供应商">
           <div className="enabledStripHeader">
@@ -173,7 +173,7 @@ function chipTitle(connection: LlmConnection): string {
         <div className="providerMarketHeader">
           <div>
             <h3>模型供应商</h3>
-            <p>选择 API Key 服务、本地模型，或自定义 OpenAI-compatible endpoint。</p>
+            <p>选择 API Key 服务、本地模型、OAuth 账号登录，或自定义 OpenAI-compatible endpoint。</p>
           </div>
           <button className="maka-button" type="button" onClick={() => startAdd('openai-compatible')}>
             自定义
@@ -195,16 +195,20 @@ function chipTitle(connection: LlmConnection): string {
           ))}
         </div>
 
-        <div className="catalogGrid providerMarketGrid">
-          {catalogProviders.map((type) => (
-            <ProviderCatalogCard
-              key={type}
-              type={type}
-              count={configuredByType(type)}
-              onSelect={() => startAdd(type)}
-            />
-          ))}
-        </div>
+        {catalogTab === 'oauth' ? (
+          <ModelOAuthSection />
+        ) : (
+          <div className="catalogGrid providerMarketGrid">
+            {catalogProviders.map((type) => (
+              <ProviderCatalogCard
+                key={type}
+                type={type}
+                count={configuredByType(type)}
+                onSelect={() => startAdd(type)}
+              />
+            ))}
+          </div>
+        )}
 
         <div className="customProviderEntry">
           <div>
@@ -365,12 +369,10 @@ export function ProviderLogo(props: { type: ProviderType; compact?: boolean }) {
 /**
  * PR-MODEL-OAUTH-SECTION-0 / PR-MODEL-OAUTH-ALL-0 / PR-CLAUDE-CARD-MOVE-0:
  *
- * Dedicated OAuth login section pinned to the top of Settings → 模型.
- * Claude lives here as the full inline card (with quota meter +
- * login/logout actions) — it was previously housed in Settings → 账号
- * but WAWQAQ called that placement out (msg ddecd729) since OAuth
- * subscriptions are conceptually a model-side concern, not an
- * account-identity concern.
+ * OAuth login catalog for Settings → 模型. It is rendered by the
+ * same tab switcher as 国内 / 海外 / 本地, not as a standalone section
+ * pinned above the provider market. Claude lives here as the full
+ * inline card (with quota meter + login/logout actions).
  *
  * Codex / Cursor / Antigravity each render as a button card below;
  * clicking opens an inline modal that drives the corresponding
@@ -418,42 +420,89 @@ const MODEL_OAUTH_CARDS: ReadonlyArray<ModelOAuthCard> = [
 
 function ModelOAuthSection() {
   const [openModal, setOpenModal] = useState<OAuthServiceId | null>(null);
+  // PR-OAUTH-CARD-LIVE-STATE-0 (WAWQAQ msg d79fd115 follow-up):
+  // before this lift the 3 button cards stayed at the static
+  // "可用 / 预览" label even after the user finished the OAuth
+  // flow in the modal — there was no parent re-fetch. We now
+  // track a runtimeState + email per service so each card can
+  // show "已登录" / the account email inline, and we re-fetch
+  // every time the modal closes (success OR cancel — the user
+  // may have logged out from inside the modal).
+  const [cardStates, setCardStates] = useState<Record<OAuthServiceId, SubscriptionSnapshot | null>>({
+    codex: null,
+    cursor: null,
+    antigravity: null,
+  });
+
+  async function refreshAllCards() {
+    const results = await Promise.all(
+      MODEL_OAUTH_CARDS.map(async (card) => {
+        try {
+          const bridge = pickSubscriptionBridge(card.id);
+          const snapshot = (await bridge.getAccountState()) as SubscriptionSnapshot;
+          return [card.id, snapshot] as const;
+        } catch {
+          return [card.id, null] as const;
+        }
+      }),
+    );
+    setCardStates((prev) => {
+      const next = { ...prev };
+      for (const [id, snapshot] of results) next[id] = snapshot;
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    void refreshAllCards();
+  }, []);
 
   return (
-    <section className="providerOAuthSection" aria-label="OAuth 登录">
-      <div className="providerOAuthHeader">
-        <h3>OAuth 登录</h3>
-        <p>用账号订阅替代 API key —— 不需要拷贝 token，登录后直接用模型。</p>
-      </div>
+    <div className="providerOAuthCatalog" aria-label="OAuth 登录" data-provider-category="oauth">
       {/* Claude renders as the full inline card with quota meter
           and login/logout. The other 3 providers render as button
           cards because their account state is simpler (no quota
           window data exposed by their APIs yet). */}
       <ClaudeSubscriptionCard />
       <div className="providerOAuthGrid">
-        {MODEL_OAUTH_CARDS.map((card) => (
-          <button
-            key={card.id}
-            type="button"
-            className="providerOAuthCard"
-            data-card-id={card.id}
-            data-status={card.status}
-            style={{ ['--oauth-accent' as string]: card.accent }}
-            onClick={() => setOpenModal(card.id)}
-          >
-            <span className="providerOAuthCardBadge">{card.statusLabel}</span>
-            <span className="providerOAuthCardName">{card.name}</span>
-            <span className="providerOAuthCardDescription">{card.description}</span>
-          </button>
-        ))}
+        {MODEL_OAUTH_CARDS.map((card) => {
+          const snapshot = cardStates[card.id];
+          const runtimeState = snapshot?.runtimeState ?? 'unknown';
+          const isLoggedIn = runtimeState === 'authenticated' || runtimeState === 'refreshing';
+          const liveBadge = isLoggedIn ? '已登录' : card.statusLabel;
+          const liveDescription = isLoggedIn && snapshot?.email
+            ? snapshot.email
+            : card.description;
+          return (
+            <button
+              key={card.id}
+              type="button"
+              className="providerOAuthCard"
+              data-card-id={card.id}
+              data-status={card.status}
+              data-logged-in={isLoggedIn ? 'true' : undefined}
+              style={{ ['--oauth-accent' as string]: card.accent }}
+              onClick={() => setOpenModal(card.id)}
+            >
+              <span className="providerOAuthCardBadge">{liveBadge}</span>
+              <span className="providerOAuthCardName">{card.name}</span>
+              <span className="providerOAuthCardDescription">{liveDescription}</span>
+            </button>
+          );
+        })}
       </div>
       {openModal !== null && (
         <SubscriptionLoginModal
           serviceId={openModal}
-          onClose={() => setOpenModal(null)}
+          onClose={() => {
+            setOpenModal(null);
+            // Always re-fetch after the modal closes — the user may
+            // have logged in, logged out, or cancelled.
+            void refreshAllCards();
+          }}
         />
       )}
-    </section>
+    </div>
   );
 }
 
@@ -679,7 +728,14 @@ function subscriptionDisplay(serviceId: OAuthServiceId): SubscriptionDisplay {
       return {
         name: 'Google Antigravity',
         shortName: 'Antigravity',
-        detail: '使用 Google 账号登录给 Gemini 模型。当前为预览占位卡片，等待 antigravity-auth 客户端配置。',
+        // OAuth flow + token persistence + IPC handlers ARE wired
+        // and tested; the only thing gating real login is the
+        // Google client_id constant (the alma reference doesn't
+        // expose it in the public plugin repo). When the user
+        // clicks 登录 the service surfaces that exact reason via
+        // its envelope, so this card-level copy stays factual
+        // without claiming the whole thing is unimplemented.
+        detail: '使用 Google 账号登录给 Gemini 模型。当前为预览状态：需要 Google client_id 后才能完成登录。',
       };
   }
 }
@@ -922,7 +978,12 @@ function ConnectionDetail(props: {
     modelSource === 'fetched' || models.length > 0
       ? models
       : fallbackModels.map((id) => ({ id }));
-  const needsSecret = defaults.authKind !== 'none';
+  const needsApiKey = defaults.authKind === 'api_key';
+  const needsOAuth = defaults.authKind === 'oauth_token';
+  const requiresCredential = defaults.authKind !== 'none';
+  const credentialTroubleshootingCopy = needsOAuth
+    ? 'OAuth 登录 / Base URL / 代理设置'
+    : 'API key / Base URL / 代理设置';
 
   async function save() {
     setBusy(true);
@@ -934,7 +995,7 @@ function ConnectionDetail(props: {
       });
       const wroteNewKey = apiKey.length > 0;
       setApiKey('');
-      const nextHasSecret = needsSecret ? await props.bridge.hasSecret(connection.slug) : true;
+      const nextHasSecret = requiresCredential ? await props.bridge.hasSecret(connection.slug) : true;
       setHasSecret(nextHasSecret);
       await props.onChanged();
       // Auto-fetch live model list as soon as the secret is in place. Without
@@ -942,7 +1003,7 @@ function ConnectionDetail(props: {
       // dropdown only contains the static fallback list (e.g. Z.ai → just
       // glm-4.7 / 4.6 / 4.5), which looks like Maka doesn't support newer
       // models. Auto-fetch on save closes that gap.
-      if (nextHasSecret && (wroteNewKey || models.length === 0)) {
+      if (nextHasSecret && (wroteNewKey || (!needsApiKey && models.length === 0))) {
         void refreshModels({ silent: true });
       }
     } finally {
@@ -997,7 +1058,7 @@ function ConnectionDetail(props: {
       if (models.length === 0) setModelSource('fallback');
       toast.error(
         `拉取模型失败 · ${connection.name}`,
-        `${message} · 当前继续显示静态列表，请确认 API key / Base URL / 代理设置后重试。`,
+        `${message} · 当前继续显示静态列表，请确认 ${credentialTroubleshootingCopy} 后重试。`,
       );
     } finally {
       setFetchingModels(false);
@@ -1039,7 +1100,7 @@ function ConnectionDetail(props: {
           placeholder={defaults.baseUrl}
         />
       </label>
-      {needsSecret && (
+      {needsApiKey && (
         <label>
           <span>API key {hasSecret ? '（已设置，粘贴新值可替换）' : ''}</span>
           <PasswordInput
@@ -1050,6 +1111,16 @@ function ConnectionDetail(props: {
           />
         </label>
       )}
+      {needsOAuth && (
+        <div className="providerUnavailableNotice" data-auth-kind="oauth">
+          <strong>{hasSecret ? 'OAuth 已登录' : '等待 OAuth 登录'}</strong>
+          <span>
+            {hasSecret
+              ? '该模型连接使用主进程保存的 OAuth access token，不在这里显示或编辑令牌。'
+              : '请到上方 OAuth 分类完成登录；登录成功后会自动出现在已启用模型里。'}
+          </span>
+        </div>
+      )}
       <ModelTable
         modelChoices={modelChoices}
         defaultModel={defaultModel}
@@ -1057,7 +1128,7 @@ function ConnectionDetail(props: {
         modelSource={modelSource}
         modelsFetchedAt={connection.modelsFetchedAt}
         fallbackCount={fallbackModels.length}
-        canRefresh={!fetchingModels && !(needsSecret && !hasSecret)}
+        canRefresh={!fetchingModels && !(requiresCredential && !hasSecret)}
         fetchingModels={fetchingModels}
         onRefresh={() => void refreshModels()}
       />
@@ -1070,7 +1141,7 @@ function ConnectionDetail(props: {
         <button className="maka-button" data-variant="primary" type="button" disabled={busy} onClick={save}>
           {busy ? '保存中…' : '保存修改'}
         </button>
-        <button className="maka-button" type="button" disabled={testing || (needsSecret && !hasSecret)} onClick={runTest}>
+        <button className="maka-button" type="button" disabled={testing || (requiresCredential && !hasSecret)} onClick={runTest}>
           {testing ? '测试中…' : '测试连接'}
         </button>
         {!props.isDefault && <button className="maka-button" type="button" onClick={setAsDefault}>设为默认</button>}
@@ -1630,5 +1701,3 @@ function presentSubscriptionState(state: SubscriptionAccountState): Subscription
       return { label: '未知状态', tone: 'muted', detail: '' };
   }
 }
-
-
