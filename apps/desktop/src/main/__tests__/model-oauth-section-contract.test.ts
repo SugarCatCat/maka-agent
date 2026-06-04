@@ -278,6 +278,43 @@ describe('Model OAuth catalog contract (PR-MODEL-OAUTH-ALL-0 + PR-CLAUDE-CARD-MO
     );
   });
 
+  it('surfaces provider detail save/delete failures instead of leaking rejected promises from actions', async () => {
+    const src = await readFile(PROVIDERS_PANEL_SOURCE, 'utf8');
+    const detail = src.match(/function ConnectionDetail[\s\S]*?function ModelTable/)?.[0] ?? '';
+
+    assert.match(
+      detail,
+      /async function save\(\) \{[\s\S]*let saved = false;[\s\S]*await props\.bridge\.update\(connection\.slug,[\s\S]*saved = true;[\s\S]*catch \(error\) \{[\s\S]*toast\.error\([\s\S]*saved \? '刷新模型连接失败' : '保存模型连接失败'/,
+      'ConnectionDetail save failures and post-save refresh failures must be visible',
+    );
+    assert.match(
+      detail,
+      /async function remove\(\) \{[\s\S]*setBusy\(true\);[\s\S]*let deleted = false;[\s\S]*await props\.bridge\.delete\(connection\.slug\);[\s\S]*deleted = true;[\s\S]*await props\.onDeleted\(\);[\s\S]*catch \(error\) \{[\s\S]*toast\.error\([\s\S]*deleted \? '刷新模型列表失败' : '删除模型连接失败'/,
+      'ConnectionDetail delete failures and post-delete refresh failures must be visible',
+    );
+    assert.match(
+      detail,
+      /<button className="maka-button" data-variant="destructive" type="button" disabled=\{busy\} onClick=\{remove\}>删除<\/button>/,
+      'Delete should be disabled while provider detail actions are busy',
+    );
+  });
+
+  it('surfaces provider detail credential-presence probe failures', async () => {
+    const src = await readFile(PROVIDERS_PANEL_SOURCE, 'utf8');
+    const detail = src.match(/function ConnectionDetail[\s\S]*?function ModelTable/)?.[0] ?? '';
+
+    assert.match(
+      detail,
+      /props\.bridge[\s\S]*\.hasSecret\(connection\.slug\)[\s\S]*\.then\(setHasSecret\)[\s\S]*\.catch\(\(error\) => \{[\s\S]*setHasSecret\(false\);[\s\S]*toast\.error\('读取模型凭据状态失败', providerPanelActionErrorMessage\(error\)\)/,
+      'ConnectionDetail must show a visible error when credential-presence probing fails',
+    );
+    assert.doesNotMatch(
+      detail,
+      /void props\.bridge\.hasSecret\(connection\.slug\)\.then\(setHasSecret\);/,
+      'ConnectionDetail must not leave credential-presence probe rejections unhandled',
+    );
+  });
+
   it('keeps an open provider detail sheet in sync with refreshed connection props without clobbering dirty drafts', async () => {
     // task #38 sweep: OAuth login/model refresh can update the same
     // connection while its detail sheet is open. State initialized from

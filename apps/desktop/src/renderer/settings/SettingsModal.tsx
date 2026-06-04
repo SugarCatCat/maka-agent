@@ -1005,6 +1005,7 @@ const PLATFORM_LABEL: Record<string, string> = {
 
 function AboutSettingsPage() {
   const [info, setInfo] = useState<AppInfo | null>(null);
+  const [infoError, setInfoError] = useState<string | null>(null);
   const toast = useToast();
 
   useEffect(() => {
@@ -1012,20 +1013,39 @@ function AboutSettingsPage() {
     window.maka.app
       .info()
       .then((next) => {
-        if (!cancelled) setInfo(next);
+        if (!cancelled) {
+          setInfo(next);
+          setInfoError(null);
+        }
       })
-      .catch(() => {});
+      .catch((error) => {
+        if (cancelled) return;
+        const message = settingsActionErrorMessage(error);
+        setInfoError(message);
+        toast.error('载入关于信息失败', message);
+      });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [toast]);
 
-  if (!info) {
+  if (!info && !infoError) {
     return (
       <div className="maka-skeleton-stack" aria-busy="true" aria-label="正在加载关于页">
         <div className="maka-skeleton maka-skeleton-line" data-size="lg" style={{ width: '38%' }} />
         <div className="maka-skeleton maka-skeleton-line" style={{ width: '70%' }} />
         <div className="maka-skeleton maka-skeleton-line" style={{ width: '52%' }} />
+      </div>
+    );
+  }
+
+  if (!info) {
+    return (
+      <div className="settingsStructuredPage">
+        <div className="settingsNotice" role="alert">
+          <strong>无法载入关于信息</strong>
+          <small>{infoError}</small>
+        </div>
       </div>
     );
   }
@@ -1646,19 +1666,27 @@ function AccountAuthActionView(props: {
 
 function DataSettingsPage() {
   const [info, setInfo] = useState<Awaited<ReturnType<typeof window.maka.app.info>> | null>(null);
+  const [infoError, setInfoError] = useState<string | null>(null);
   const toast = useToast();
 
   useEffect(() => {
     let cancelled = false;
     void window.maka.app.info().then((next) => {
-      if (!cancelled) setInfo(next);
-    }).catch(() => {
-      if (!cancelled) setInfo(null);
+      if (!cancelled) {
+        setInfo(next);
+        setInfoError(null);
+      }
+    }).catch((error) => {
+      if (cancelled) return;
+      const message = settingsActionErrorMessage(error);
+      setInfo(null);
+      setInfoError(message);
+      toast.error('载入数据目录失败', message);
     });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [toast]);
 
   async function openWorkspace() {
     if (!info) return;
@@ -1688,7 +1716,7 @@ function DataSettingsPage() {
         <SettingRow
           title="工作区路径"
           detail="会话、设置、credentials、skills 都存在这个目录下。"
-          value={info?.workspacePath ?? '正在加载…'}
+          value={info?.workspacePath ?? (infoError ? '载入失败' : '正在加载…')}
         />
         <SettingRow
           title="存储引擎"
@@ -1719,6 +1747,11 @@ function DataSettingsPage() {
         本机数据保存在工作区。需要备份时先退出 Maka，再复制整个目录；恢复时替换同一路径后重启。
         API key 使用系统 safeStorage 加密，跨设备恢复后需要重新测试连接。
       </div>
+      {infoError && (
+        <div className="settingsNotice" role="alert">
+          无法载入工作区路径：{infoError}
+        </div>
+      )}
     </div>
   );
 }
@@ -1966,17 +1999,27 @@ function ThemeSettingsPage(props: {
   onDensityChange(density: UiDensity): void;
   onThemePaletteChange(palette: ThemePalette): void;
 }) {
+  const toast = useToast();
+
+  async function persistAppearance(patch: NonNullable<Parameters<typeof window.maka.settings.update>[0]['appearance']>) {
+    try {
+      await props.onUpdate({ appearance: patch });
+    } catch (error) {
+      toast.error('保存外观设置失败', settingsActionErrorMessage(error));
+    }
+  }
+
   async function setTheme(next: ThemePreference) {
     // Apply immediately for instant feedback, then persist. If persistence
     // fails the visual stays — the next app start will re-read whatever
     // landed on disk.
     props.onThemeChange(next);
-    await props.onUpdate({ appearance: { theme: next } });
+    await persistAppearance({ theme: next });
   }
 
   async function setDensity(next: UiDensity) {
     props.onDensityChange(next);
-    await props.onUpdate({ appearance: { density: next } });
+    await persistAppearance({ density: next });
   }
 
   // PR-THEME-PRODUCT-PALETTES-0 (WAWQAQ msg `4472ee95`) + PR-THEME-APPLY-
@@ -1989,7 +2032,7 @@ function ThemeSettingsPage(props: {
   const currentPalette: ThemePalette = props.themePalette;
   async function setPalette(next: ThemePalette) {
     props.onThemePaletteChange(next);
-    await props.onUpdate({ appearance: { palette: next } });
+    await persistAppearance({ palette: next });
   }
 
   return (
@@ -2107,13 +2150,26 @@ function WebSearchSettingsPage(props: {
   const [liveQueryError, setLiveQueryError] = useState<string | null>(null);
   const toast = useToast();
 
-  async function setEnabled(enabled: boolean) {
-    await props.onUpdate({ webSearch: { enabled } });
+  async function updateWebSearch(
+    patch: NonNullable<Parameters<typeof window.maka.settings.update>[0]['webSearch']>,
+    failureTitle = '保存联网搜索设置失败',
+  ): Promise<boolean> {
+    try {
+      await props.onUpdate({ webSearch: patch });
+      return true;
+    } catch (error) {
+      toast.error(failureTitle, settingsActionErrorMessage(error));
+      return false;
+    }
   }
 
-  async function persistCredentialStatus(status: WebSearchCredentialStatus, credentialVersion: number) {
-    await props.onUpdate({
-      webSearch: {
+  async function setEnabled(enabled: boolean) {
+    await updateWebSearch({ enabled });
+  }
+
+  async function persistCredentialStatus(status: WebSearchCredentialStatus, credentialVersion: number): Promise<boolean> {
+    return updateWebSearch(
+      {
         providers: {
           tavily: {
             credentialVersion,
@@ -2122,22 +2178,21 @@ function WebSearchSettingsPage(props: {
           },
         },
       },
-    });
+      '保存联网搜索状态失败',
+    );
   }
 
   async function saveDraftKey() {
     if (usingEnvKey || draftKey.length === 0) return;
-    await props.onUpdate({
-      webSearch: { providers: { tavily: { apiKey: draftKey } } },
-    });
+    const saved = await updateWebSearch({ providers: { tavily: { apiKey: draftKey } } });
+    if (!saved) return;
     setDraftKey('');
     toast.success('已保存 Tavily API key', '可点击「测试」做一次真实请求验证。');
   }
 
   async function clearKey() {
-    await props.onUpdate({
-      webSearch: { enabled: false, providers: { tavily: { apiKey: '' } } },
-    });
+    const saved = await updateWebSearch({ enabled: false, providers: { tavily: { apiKey: '' } } });
+    if (!saved) return;
     setDraftKey('');
     toast.success('已清空 Tavily 凭据', '联网搜索已自动关闭。');
   }
@@ -2152,7 +2207,7 @@ function WebSearchSettingsPage(props: {
         apiKey: usesDraftKey ? draftKey : undefined,
       });
       if (!usesDraftKey && hasUsableKey) {
-        await persistCredentialStatus(webSearchCredentialStatusFromResponse(result), testedCredentialVersion);
+        void persistCredentialStatus(webSearchCredentialStatusFromResponse(result), testedCredentialVersion);
       }
       if (result.ok) {
         toast.success('Tavily 凭据可用', `返回 ${result.results.length} 条结果。`);
@@ -2182,12 +2237,12 @@ function WebSearchSettingsPage(props: {
       if (result.ok) {
         setLiveQueryResults(result.results);
         if (hasUsableKey) {
-          await persistCredentialStatus('valid', queriedCredentialVersion);
+          void persistCredentialStatus('valid', queriedCredentialVersion);
         }
       } else {
         setLiveQueryError(result.message);
         if (hasUsableKey) {
-          await persistCredentialStatus(webSearchCredentialStatusFromResponse(result), queriedCredentialVersion);
+          void persistCredentialStatus(webSearchCredentialStatusFromResponse(result), queriedCredentialVersion);
         }
       }
     } catch (err) {
@@ -3415,7 +3470,11 @@ function NetworkSettingsPage(props: {
   const toast = useToast();
 
   async function updateProxy(patch: Partial<NetworkProxySettings>) {
-    await props.onUpdate({ network: { proxy: patch } });
+    try {
+      await props.onUpdate({ network: { proxy: patch } });
+    } catch (error) {
+      toast.error('保存网络设置失败', settingsActionErrorMessage(error));
+    }
   }
 
   async function testProxy() {
@@ -3446,7 +3505,7 @@ function NetworkSettingsPage(props: {
         <Switch
           ariaLabel="启用代理服务器"
           checked={proxy.enabled}
-          onChange={(enabled) => updateProxy({ enabled })}
+          onChange={(enabled) => void updateProxy({ enabled })}
         />
       </div>
 
@@ -3455,7 +3514,7 @@ function NetworkSettingsPage(props: {
           <div className="settingsFormGrid settingsFormGridProxy">
             <label>
               <span>代理协议</span>
-              <select value={proxy.protocol} onChange={(event) => updateProxy({ protocol: event.currentTarget.value as NetworkProxySettings['protocol'] })}>
+              <select value={proxy.protocol} onChange={(event) => void updateProxy({ protocol: event.currentTarget.value as NetworkProxySettings['protocol'] })}>
                 <option value="http">HTTP/HTTPS</option>
                 <option value="https">HTTPS</option>
                 <option value="socks5">SOCKS5</option>
@@ -3463,11 +3522,11 @@ function NetworkSettingsPage(props: {
             </label>
             <label>
               <span>服务器地址</span>
-              <input value={proxy.host} onChange={(event) => updateProxy({ host: event.currentTarget.value })} placeholder="127.0.0.1" />
+              <input value={proxy.host} onChange={(event) => void updateProxy({ host: event.currentTarget.value })} placeholder="127.0.0.1" />
             </label>
             <label>
               <span>端口</span>
-              <input value={String(proxy.port || '')} onChange={(event) => updateProxy({ port: Number(event.currentTarget.value) || 0 })} placeholder="7890" />
+              <input value={String(proxy.port || '')} onChange={(event) => void updateProxy({ port: Number(event.currentTarget.value) || 0 })} placeholder="7890" />
             </label>
           </div>
 
@@ -3479,7 +3538,7 @@ function NetworkSettingsPage(props: {
             <Switch
               ariaLabel="启用代理认证"
               checked={proxy.authEnabled}
-              onChange={(authEnabled) => updateProxy({ authEnabled })}
+              onChange={(authEnabled) => void updateProxy({ authEnabled })}
             />
           </div>
 
@@ -3487,11 +3546,11 @@ function NetworkSettingsPage(props: {
             <div className="settingsFormGrid">
               <label>
                 <span>用户名</span>
-                <input value={proxy.username} onChange={(event) => updateProxy({ username: event.currentTarget.value })} />
+                <input value={proxy.username} onChange={(event) => void updateProxy({ username: event.currentTarget.value })} />
               </label>
               <label>
                 <span>密码</span>
-                <PasswordInput value={proxy.password} onChange={(next) => updateProxy({ password: next })} ariaLabel="代理密码" />
+                <PasswordInput value={proxy.password} onChange={(next) => void updateProxy({ password: next })} ariaLabel="代理密码" />
               </label>
             </div>
           )}
@@ -3500,7 +3559,7 @@ function NetworkSettingsPage(props: {
             <span>代理白名单</span>
             <input
               value={proxy.bypassList.join(', ')}
-              onChange={(event) => updateProxy({ bypassList: csvList(event.currentTarget.value) })}
+              onChange={(event) => void updateProxy({ bypassList: csvList(event.currentTarget.value) })}
               placeholder="metaso.cn, baidu.com"
             />
             <small>这些域名将绕过代理直连，多个用逗号分隔。</small>
@@ -3553,24 +3612,30 @@ function OpenGatewaySettingsPage(props: {
     setTokenDraft(gateway.token);
   }, [gateway.token]);
 
-  async function updateGateway(patch: Partial<AppSettings['openGateway']>) {
+  async function updateGateway(patch: Partial<AppSettings['openGateway']>): Promise<boolean> {
     setSaving(true);
     try {
       await props.onUpdate({ openGateway: patch });
+      return true;
+    } catch (error) {
+      toast.error('保存开放网关设置失败', settingsActionErrorMessage(error));
+      return false;
     } finally {
       setSaving(false);
     }
   }
 
   async function saveToken(nextToken = tokenDraft.trim()) {
-    await updateGateway({ token: nextToken });
+    const saved = await updateGateway({ token: nextToken });
+    if (!saved) return;
     toast.success(nextToken ? '网关 token 已保存' : '网关 token 已清空');
   }
 
   async function generateToken() {
     const token = generateGatewayToken();
     setTokenDraft(token);
-    await updateGateway({ token });
+    const saved = await updateGateway({ token });
+    if (!saved) return;
     toast.success('网关 token 已生成', '本机 API 需要 Authorization Bearer token。');
   }
 
@@ -3650,7 +3715,7 @@ function OpenGatewaySettingsPage(props: {
           ariaLabel="开放本机 API 网关"
           checked={gateway.enabled}
           disabled={saving}
-          onChange={(enabled) => updateGateway({ enabled })}
+          onChange={(enabled) => void updateGateway({ enabled })}
         />
       </div>
 
@@ -3660,7 +3725,7 @@ function OpenGatewaySettingsPage(props: {
           <select
             value={gateway.host}
             disabled={saving}
-            onChange={(event) => updateGateway({ host: event.currentTarget.value as AppSettings['openGateway']['host'] })}
+            onChange={(event) => void updateGateway({ host: event.currentTarget.value as AppSettings['openGateway']['host'] })}
           >
             <option value="127.0.0.1">127.0.0.1</option>
             <option value="0.0.0.0">0.0.0.0</option>
@@ -3672,7 +3737,7 @@ function OpenGatewaySettingsPage(props: {
             value={String(gateway.port)}
             disabled={saving}
             inputMode="numeric"
-            onChange={(event) => updateGateway({ port: Number(event.currentTarget.value) || 3939 })}
+            onChange={(event) => void updateGateway({ port: Number(event.currentTarget.value) || 3939 })}
           />
         </label>
         <label>
