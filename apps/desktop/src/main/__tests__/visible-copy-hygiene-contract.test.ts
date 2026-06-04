@@ -35,6 +35,7 @@ const FILES_TO_SCAN = [
   join(process.cwd(), 'src', 'renderer', 'main.tsx'),
   join(process.cwd(), 'src', 'renderer', 'OnboardingHero.tsx'),
   join(process.cwd(), 'src', 'renderer', 'artifact-pane.tsx'),
+  join(process.cwd(), 'src', 'renderer', 'artifact-preview.tsx'),
   join(process.cwd(), 'src', 'renderer', 'artifact-preview-registry-shell.tsx'),
   join(process.cwd(), 'src', 'renderer', 'onboarding-hero-copy.ts'),
   join(process.cwd(), 'src', 'renderer', 'chat-header-alert.ts'),
@@ -136,6 +137,12 @@ const FORBIDDEN_VISIBLE_COPY: ForbiddenCopy[] = [
     needle: /more (?:stdout |stderr )?lines hidden/,
     reason:
       "tool result previews are user-visible runtime output surfaces; truncation markers should use Chinese product copy such as `已隐藏 N 行`, not English debug copy.",
+  },
+  {
+    label: 'English chat fallback name in destructive confirmation',
+    needle: /this chat/,
+    reason:
+      "delete confirmations are user-visible product copy. A missing session title should fall back to Chinese `当前会话`, not English `this chat` inside a Chinese dialog.",
   },
   {
     label: 'English terminal empty-output marker',
