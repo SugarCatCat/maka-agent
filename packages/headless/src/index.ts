@@ -341,8 +341,6 @@ export type {
   HeadlessBackendContext,
   IsolatedCommandInput,
   IsolatedCommandResult,
-  IsolatedEditFileInput,
-  IsolatedEditFileResult,
   IsolatedGlobInput,
   IsolatedGlobResult,
   IsolatedGrepInput,
