@@ -351,8 +351,6 @@ export function projectTaskRun(events: readonly TaskEvent[], taskRunId?: string)
       heavyTaskMode: projection.heavyTaskMode,
       latestHeavyTaskTodos: projection.latestHeavyTaskTodos,
       latestHeavyTaskSelfCheck: projection.latestHeavyTaskSelfCheck,
-      heavyTaskEvidence: projection.heavyTaskEvidence,
-      heavyTaskEngineeringRecords: projection.heavyTaskEngineeringRecords,
       decisions: projection.decisions,
     });
   }
