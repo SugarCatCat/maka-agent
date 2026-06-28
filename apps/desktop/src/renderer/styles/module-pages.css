@@ -851,6 +851,74 @@
   justify-content: center;
 }
 
+/* Grouped menu form of the settings-select family (`SettingsSelectGroups`):
+   provider groups, each heading carrying a brand mark, over the shared
+   checkmark rows. The chat model pickers render this body inside their own
+   pill trigger; any future grouped select reuses it. Geometry traces to the
+   former bespoke model-switcher menu (max-content hug, 32px rows), now folded
+   into this one family instead of a parallel `.maka-model-switcher-*` recipe. */
+.settingsSelectMenuPopup {
+  width: max-content;
+  min-width: 200px;
+  max-width: min(320px, calc(100vw - 32px));
+  max-height: min(420px, var(--available-height));
+  /* The popup itself is the scroll container: the row list can exceed the cap
+     when a provider exposes many models, and the inner SelectList's
+     `--available-height` ceiling is too tall to engage here, so without this
+     the overflow rows spill out below the rounded box. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px;
+  border-radius: 12px;
+  background: var(--background);
+  box-shadow: var(--shadow-maka-panel);
+}
+
+.settingsSelectMenuPopup [role="option"] {
+  min-height: 32px;
+  align-items: center;
+  border-radius: 8px;
+  padding: 6px 12px;
+}
+
+.settingsSelectMenuOption {
+  display: block;
+  color: var(--foreground);
+  font-size: 0.875rem; /* text-sm on the 15px root — same scale as headings */
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+/* Heading: same 13px as the rows; hierarchy comes from weight 500 + muted ink
+   + the brand mark, not a different size or an uppercase eyebrow. The mark sits
+   in the 1rem leading column so it lines up under each row's selected check. */
+.settingsSelectMenuPopup .settingsSelectMenuGroupLabel {
+  display: grid;
+  grid-template-columns: 1rem 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 4px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--muted-foreground);
+}
+
+.settingsSelectMenuGroupLogo {
+  justify-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1em;
+  height: 1.1em;
+  color: var(--foreground); /* monochrome marks read full-ink, not muted */
+}
+
+.settingsSelectMenuGroupLogo svg {
+  width: 100%;
+  height: 100%;
+}
+
 .maka-plan-search-summary {
   display: flex;
   min-width: 0;
@@ -2074,55 +2142,6 @@
   font-weight: 600;
 }
 
-.maka-model-switcher-positioner {
-  z-index: var(--z-dropdown);
-  outline: none;
-}
-
-.maka-model-switcher-popup {
-  /* Hug the widest row instead of a fixed slab: short model ids
-     (`gpt-5.5`) no longer sit in a half-empty 330px box. Floor keeps it
-     from getting cramped; cap tames long custom model names and narrow
-     viewports. */
-  width: max-content;
-  min-width: 200px;
-  max-width: min(320px, calc(100vw - 32px));
-  max-height: min(420px, var(--available-height));
-  padding: 8px;
-  border-radius: 12px;
-  background: var(--background);
-  /* Reuse the governed panel-elevation token. A bespoke shadow derived from
-     `--foreground` turned WHITE in dark mode (foreground is near-white there),
-     painting a luminous ring around the menu. `--shadow-maka-panel` is a fixed
-     dark slate, stable across themes, and matches every other popover/dialog. */
-  box-shadow: var(--shadow-maka-panel);
-}
-
-/* Provider grouping heading. Type is governed to the shared scale: same
-   text-sm (0.875rem ≈ 13px) as the rows; hierarchy comes from uppercase +
-   weight + muted ink, not from a different size. Replaces the former
-   hairline between groups. */
-.maka-model-switcher-popup .maka-model-switcher-group-label {
-  padding: 6px 12px 4px;
-  font-size: 0.875rem;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  line-height: 1.4;
-  color: var(--muted-foreground);
-}
-
-.maka-model-switcher-popup [role="option"] {
-  min-height: 32px;
-  align-items: center;
-  border-radius: 8px;
-  padding: 6px 12px;
-}
-
-.maka-model-switcher-item-main {
-  display: block;
-  color: var(--foreground);
-  font-size: 0.875rem; /* text-sm on a 15px root — governed, not a hand-tuned px */
-  font-weight: 500;
-  line-height: 1.4;
-}
+/* The popup, group headings, and option rows now render through the shared
+   `.settingsSelectMenu*` recipe (see the settings-select family above); the
+   trigger chrome above stays bespoke to the composer pill. */

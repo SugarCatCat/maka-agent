@@ -10,7 +10,7 @@
  * `@maka/ui` Composer surface).
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button as UiButton,
   SelectGroup,
@@ -33,32 +33,51 @@ import {
   modelChoiceValue,
   parseModelChoiceValue,
 } from './chat-model-helpers.js';
-import { type SessionSummary } from '@maka/core';
+import { type ProviderType, type SessionSummary } from '@maka/core';
 
 /**
  * Shared grouped option rows for both model pickers: one `<SelectItem>` per
  * model, grouped under a leak-safe heading from `modelMenuGroups` — the short
  * provider label, disambiguated by connection slug when the same provider has
  * multiple connections. The heading never derives from the connection name
- * (which embeds the OAuth account email). The selected-row check is the
+ * (which embeds the OAuth account email). Its brand mark is injected by the
+ * desktop app via `renderProviderMark` so `@maka/ui` stays free of the provider
+ * SVG library. Headings + rows wear the shared `.settingsSelectMenu*` recipe so
+ * the menu reads as the governed grouped form; the selected-row check is the
  * `SelectItem` primitive's built-in `ItemIndicator`.
  */
-function ModelChoiceOptions({ groups }: { groups: ModelMenuGroup[] }) {
+function ModelChoiceOptions({
+  groups,
+  renderProviderMark,
+}: {
+  groups: ModelMenuGroup[];
+  renderProviderMark?: (type: ProviderType) => ReactNode;
+}) {
   return (
     <>
-      {groups.map((group) => (
-        <SelectGroup key={group.connectionSlug} className="maka-model-switcher-group">
-          <SelectGroupLabel className="maka-model-switcher-group-label">{group.heading}</SelectGroupLabel>
-          {group.choices.map((choice) => (
-            <SelectItem
-              key={modelChoiceValue(choice.connectionSlug, choice.model)}
-              value={modelChoiceValue(choice.connectionSlug, choice.model)}
-            >
-              <span className="maka-model-switcher-item-main">{choice.label}</span>
-            </SelectItem>
-          ))}
-        </SelectGroup>
-      ))}
+      {groups.map((group) => {
+        const logo = renderProviderMark?.(group.providerType);
+        return (
+          <SelectGroup key={group.connectionSlug}>
+            <SelectGroupLabel className="settingsSelectMenuGroupLabel">
+              {logo ? (
+                <span className="settingsSelectMenuGroupLogo" aria-hidden="true">{logo}</span>
+              ) : (
+                <span aria-hidden="true" />
+              )}
+              <span>{group.heading}</span>
+            </SelectGroupLabel>
+            {group.choices.map((choice) => {
+              const value = modelChoiceValue(choice.connectionSlug, choice.model);
+              return (
+                <SelectItem key={value} value={value}>
+                  <span className="settingsSelectMenuOption">{choice.label}</span>
+                </SelectItem>
+              );
+            })}
+          </SelectGroup>
+        );
+      })}
     </>
   );
 }
@@ -71,6 +90,7 @@ export function ChatModelSwitcher(props: {
   choices: ChatModelChoice[];
   pending?: boolean;
   disabledReason?: string;
+  renderProviderMark?(type: ProviderType): ReactNode;
   onChange?(input: { llmConnectionSlug: string; model: string }): void | Promise<void>;
 }) {
   const [localPending, setLocalPending] = useState(false);
@@ -171,8 +191,8 @@ export function ChatModelSwitcher(props: {
           <SelectValue className="maka-model-switcher-value" />
         </SelectTrigger>
         <SelectPortal>
-          <SelectPositioner alignItemWithTrigger={false} sideOffset={8} className="maka-model-switcher-positioner">
-            <SelectPopup className="maka-model-switcher-popup">
+          <SelectPositioner alignItemWithTrigger={false} sideOffset={8} className="settingsSelectPositioner">
+            <SelectPopup className="settingsSelectMenuPopup">
               {/* PR-CHAT-CHROME-FIX-0 (WAWQAQ msg `ccce4a31`):
                    menu rows show only the raw model name. The
                    group label (connection + email) and the meta
@@ -186,12 +206,12 @@ export function ChatModelSwitcher(props: {
                 {!currentKnownChoice && (
                   <>
                     <SelectItem value={currentValue}>
-                      <span className="maka-model-switcher-item-main">{currentModel}</span>
+                      <span className="settingsSelectMenuOption">{currentModel}</span>
                     </SelectItem>
                     {grouped.length > 0 && <SelectSeparator />}
                   </>
                 )}
-                <ModelChoiceOptions groups={grouped} />
+                <ModelChoiceOptions groups={grouped} renderProviderMark={props.renderProviderMark} />
               </SelectList>
             </SelectPopup>
           </SelectPositioner>
@@ -212,6 +232,7 @@ export function NewChatModelPicker(props: {
   label: string;
   choices: ChatModelChoice[];
   currentValue?: string;
+  renderProviderMark?(type: ProviderType): ReactNode;
   onPick(input: { llmConnectionSlug: string; model: string }): void | Promise<void>;
 }) {
   const grouped = modelMenuGroups(props.choices);
@@ -238,10 +259,10 @@ export function NewChatModelPicker(props: {
         {/* SelectTrigger already renders a BaseSelect.Icon chevron — no manual one. */}
       </SelectTrigger>
       <SelectPortal>
-        <SelectPositioner alignItemWithTrigger={false} sideOffset={8} className="maka-model-switcher-positioner">
-          <SelectPopup className="maka-model-switcher-popup">
+        <SelectPositioner alignItemWithTrigger={false} sideOffset={8} className="settingsSelectPositioner">
+          <SelectPopup className="settingsSelectMenuPopup">
             <SelectList>
-              <ModelChoiceOptions groups={grouped} />
+              <ModelChoiceOptions groups={grouped} renderProviderMark={props.renderProviderMark} />
             </SelectList>
           </SelectPopup>
         </SelectPositioner>

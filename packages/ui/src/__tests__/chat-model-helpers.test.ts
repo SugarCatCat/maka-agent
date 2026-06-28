@@ -44,6 +44,20 @@ test('cross-provider same model name stays in separate, distinguishable groups',
   );
 });
 
+test('each group carries its providerType so the menu can pick the right brand mark', () => {
+  // The grouped menu renders a provider brand mark on each heading, keyed off
+  // this field; a regression that dropped it would silently show the wrong logo.
+  const groups = modelMenuGroups([
+    choice('zai-live', 'zai-coding-plan', 'glm-4.6'),
+    choice('zai-live', 'zai-coding-plan', 'glm-5'),
+    choice('anthropic-main', 'anthropic', 'claude-opus-4-8'),
+  ]);
+  const bySlug = new Map(groups.map((g) => [g.connectionSlug, g]));
+  assert.equal(bySlug.get('zai-live')?.providerType, 'zai-coding-plan');
+  assert.equal(bySlug.get('zai-live')?.choices.length, 2, 'models of one connection stay in one group');
+  assert.equal(bySlug.get('anthropic-main')?.providerType, 'anthropic');
+});
+
 test('headings never leak an account email (no @), even with slug disambiguation', () => {
   // modelMenuGroups never receives connection.name, so a leak is impossible by
   // construction; this guards against a future regression that reintroduces it.
