@@ -299,6 +299,13 @@
   --maka-titlebar-control-safe-left: 94px;
   --maka-titlebar-control-safe-top: 20px;
 
+  /* Shared top chrome geometry for .maka-workspace-top-actions
+     (sidebar.css) and the in-flow chat status row (module-pages.css).
+     The status row only shares the toolbar's right edge; it no longer
+     anchors off the toolbar bottom. */
+  --maka-workspace-top-actions-top: calc(var(--maka-titlebar-control-safe-top) - 17px);
+  --maka-workspace-top-actions-right: 24px;
+
   /* session list geometry */
   --w-sessionlist: 240px;
   --h-list-header: 52px;
